@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
+import json
 
 # Konfiguracja
 BATCH_SIZE = 32
@@ -83,6 +84,10 @@ for epoch in range(EPOCHS):
 
     acc = correct / total * 100
     print(f"Epoch {epoch+1}/{EPOCHS} | Loss: {total_loss:.4f} | Val Accuracy: {acc:.2f}%")
+
+# Zapisz mapowanie klas po trenowaniu
+with open("class_index.json", "w") as f:
+    json.dump(train_dataset.class_to_idx, f)
 
 # Zapis modelu
 torch.save(model.state_dict(), "chess_cnn_model.pth")

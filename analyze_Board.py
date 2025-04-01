@@ -1,9 +1,17 @@
-# Środowisko zostało zresetowane — ponownie uruchamiam kompletny czysty kod
-
 import torch
 from torchvision import transforms
 from PIL import Image
 import os
+import json
+import cv2
+import shutil
+
+# Wczytaj zapisane mapowanie klas
+with open("class_index.json", "r") as f:
+    class_to_idx = json.load(f)
+
+# Odwróć mapowanie: indeks → nazwa klasy
+idx_to_class = {v: k for k, v in class_to_idx.items()}
 
 # Mapowanie klas do symboli FEN
 CLASS_TO_FEN = {
@@ -68,13 +76,14 @@ def get_predictions(eval_dir="eval_pola"):
                 with torch.no_grad():
                     output = model(input_tensor)
                     pred_idx = torch.argmax(output, dim=1).item()
-                    predictions[field_code] = CLASSES[pred_idx]
+                    predictions[field_code] = idx_to_class[pred_idx]
     return predictions
 
 # Konwersja predykcji do FEN
-def predictions_to_fen(predictions):
+def predictions_to_fen(predictions, side='w'):
     fen_rows = []
-    for rank in range(8, 0, -1):
+    ranks = range(8, 0, -1) if side == 'w' else range(1, 9)
+    for rank in ranks:
         row = ""
         empty_count = 0
         for file in "abcdefgh":
@@ -91,19 +100,80 @@ def predictions_to_fen(predictions):
         if empty_count:
             row += str(empty_count)
         fen_rows.append(row)
-    return "/".join(fen_rows) + " w - - 0 1"
+    if side == 'b':
+        fen_rows = fen_rows[::-1]
+    return "/".join(fen_rows) + f" {side} - - 0 1"
 
 # Wykonanie
 predictions = get_predictions()
-
-def verify_predictions(predictions):
-    all_squares = [f+str(r) for r in range(1, 9) for f in "abcdefgh"]
-    missing = [sq for sq in all_squares if sq not in predictions]
-    if missing:
-        print(f"Brakujące pola: {missing}")
-    return len(missing) == 0
-
-for square in sorted(predictions):
-    print(f"{square}: {predictions[square]}")
 generated_fen = predictions_to_fen(predictions)
-generated_fen
+
+def get_fen_from_eval_pola(eval_dir="eval_pola", side='w'):
+    predictions = get_predictions(eval_dir)
+    return predictions_to_fen(predictions, side=side)
+
+
+FEN_MAP = {
+    'r': 'br', 'n': 'bn', 'b': 'bb', 'q': 'bq', 'k': 'bk', 'p': 'bp',
+    'R': 'wr', 'N': 'wn', 'B': 'wb', 'Q': 'wq', 'K': 'wk', 'P': 'wp'
+}
+
+def fen_to_labels(fen_string):
+    board = []
+    rows = fen_string.strip().split()[0].split('/')
+    for row in rows:
+        row_data = []
+        for ch in row:
+            if ch.isdigit():
+                row_data.extend(['empty'] * int(ch))
+            else:
+                row_data.append(FEN_MAP.get(ch, 'empty'))
+        board.append(row_data)
+    return board
+
+def process_board_image(img_name, input_dir='resized_images', output_dir='eval_pola', flip=False):
+    import shutil
+    import cv2
+
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    img_path = os.path.join(input_dir, img_name + '.png')
+    img = cv2.imread(img_path)
+    if img is None:
+        print(f"Błąd wczytywania obrazu: {img_path}")
+        return
+
+    if flip:
+        img = cv2.flip(img, -1)  # obrót całej planszy o 180°
+
+    h, w = img.shape[:2]
+    tile_h = h // 8
+    tile_w = w // 8
+
+    for row in range(8):
+        for col in range(8):
+            y1 = row * tile_h
+            y2 = (row + 1) * tile_h
+            x1 = col * tile_w
+            x2 = (col + 1) * tile_w
+            square_img = img[y1:y2, x1:x2]
+
+            if flip:
+                square_img = cv2.rotate(square_img, cv2.ROTATE_180)
+
+            label_dir = os.path.join(output_dir, 'unknown')
+            os.makedirs(label_dir, exist_ok=True)
+
+            field_name = f"{img_name}_{chr(ord('a') + col)}{8 - row}.png"
+            cv2.imwrite(os.path.join(label_dir, field_name), square_img)
+
+    print(f"Obraz {img_name} podzielony na pola w katalogu: {output_dir}")
+
+
+
+if __name__ == "__main__":
+    fen = get_fen_from_eval_pola()
+    print("Wygenerowany FEN:", fen)
+

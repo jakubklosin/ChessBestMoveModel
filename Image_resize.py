@@ -50,5 +50,4 @@ def process_single_image(input_path='Images/new_chess10.png', output_dir='resize
     print(f"Zapisano: {output_path}")
 
 process_single_image()
-
 #process_all_images()
